@@ -11,7 +11,7 @@ const NAV = [
   { href: "#about", label: "About" },
 ];
 
-const REPO_URL = "https://github.com/johndesantis/tecnoindicator";
+const REPO_URL = "https://github.com/xfst14/TecnoIndicator";
 
 interface FooterProps {
   lastUpdated: Date;
