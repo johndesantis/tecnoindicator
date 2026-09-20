@@ -11,7 +11,7 @@ import { buildFallbackSolutions } from "./_shared/solutions.js";
 const MAX_SOLUTIONS = 3;
 
 const SYSTEM_PROMPT_REGIONAL = (regionName: string) =>
-  `You are a Senior Commodity Risk Analyst and Supply Chain Strategist specializing in ${regionName} energy and water markets. Based on the current ${regionName}-specific market factors, analytics, and fresh news excerpts, generate exactly 3 actionable solution recommendations for ${regionName} oil, electricity, and water market participants. Each solution must be tied to a specific factor/trend, include the concrete action to take, and describe the expected impact. Solutions must be AI-generated and dynamic — no static or hardcoded solutions are permitted. Return strict JSON only. Do not return markdown or commentary outside JSON.`;
+  `You are a Senior Commodity Risk Analyst and Supply Chain Strategist specializing in ${regionName} energy and water markets. Based on the current ${regionName}-specific market factors, analytics, and fresh news excerpts, generate exactly 3 actionable solution recommendations for ${regionName} oil, electricity, and water market participants. Each solution must be tied to a specific factor/trend, include the concrete action to take, and describe the expected impact. Solutions must be AI-generated and dynamic — no static or hardcoded solutions are permitted. If news data is limited for ${regionName}, draw on global market trends that affect ${regionName} and generate contextually appropriate solutions. Return strict JSON only. Do not return markdown or commentary outside JSON.`;
 
 const REGION_QUERIES: Record<Region, string[]> = {
   asia: ["Asia oil market prices China India demand OPEC 2026", "Asia electricity power prices renewables grid China India 2026", "Asia water prices scarcity drought urbanization 2026"],
@@ -111,7 +111,7 @@ async function fetchNews(region: Region): Promise<Array<{ title: string; url: st
   return candidates.slice(0, 8);
 }
 
-async function analyzeSolutions(region: Region): Promise<Solution[]> {
+async function analyzeSolutions(region: Region): Promise<{ solutions: Solution[]; aiUnavailable: boolean; aiReturnedEmpty: boolean }> {
   const scope = region as RegionId;
   const cacheKey = `dynamic-solutions:${scope}`;
   const current = await getCache<Solution[]>(cacheKey, FACTORS_CACHE_MS);
@@ -120,14 +120,23 @@ async function analyzeSolutions(region: Region): Promise<Solution[]> {
   const news = await fetchNews(region);
   const systemPrompt = SYSTEM_PROMPT_REGIONAL(REGION_NAMES[region]);
   const payload = { messages: [{ role: "system", content: systemPrompt }, { role: "user", content: JSON.stringify({ analytics, factors: factors.map((f: Factor) => ({ name: f.name, explanation: f.explanation, direction: f.direction, magnitude: f.magnitude, commodities: f.commodities, importanceScore: f.importanceScore })), news: news.map((n) => ({ title: n.title, source: n.url, snippet: n.snippet?.slice(0, 2000) })) }) }] };
-  const response = await kiloRouter.kiloInfer({ ...payload, max_tokens: 4096, temperature: 0.2 });
-  const content = response.choices?.[0]?.message?.content ?? "";
-const parsed = safeParseJson<{ solutions?: unknown[] }>(content);
-const rawSolutions = parsed?.solutions ?? [];
-if (!rawSolutions || rawSolutions.length === 0) return buildFallbackSolutions(scope);
-const normalized = rawSolutions.map((s) => normalizeSolution(s, scope)).filter((s): s is Solution => s !== null);
-if (!normalized || normalized.length === 0) return buildFallbackSolutions(scope);
-  return replaceOldest(current ?? [], normalized);
+  let response: unknown;
+  try {
+    response = await kiloRouter.kiloInfer({ ...payload, max_tokens: 4096, temperature: 0.2 });
+  } catch (err) {
+    return { solutions: buildFallbackSolutions(scope), aiUnavailable: true, aiReturnedEmpty: false };
+  }
+  const content = (response as { choices?: Array<{ message?: { content?: string } }> })?.choices?.[0]?.message?.content ?? "";
+  const parsed = safeParseJson<{ solutions?: unknown[] }>(content);
+  const rawSolutions = parsed?.solutions ?? [];
+  if (!rawSolutions || rawSolutions.length === 0) {
+    return { solutions: buildFallbackSolutions(scope), aiUnavailable: false, aiReturnedEmpty: true };
+  }
+  const normalized = rawSolutions.map((s) => normalizeSolution(s, scope)).filter((s): s is Solution => s !== null);
+  if (!normalized || normalized.length === 0) {
+    return { solutions: buildFallbackSolutions(scope), aiUnavailable: false, aiReturnedEmpty: true };
+  }
+  return { solutions: replaceOldest(current ?? [], normalized), aiUnavailable: false, aiReturnedEmpty: false };
 }
 
 export default async function handler(req: Request): Promise<Response> {
@@ -147,9 +156,11 @@ export default async function handler(req: Request): Promise<Response> {
         return Response.json({ solutions: cached, region, scope, count: cached.length, aiCurated: true, cacheKey, updatedAt: new Date().toISOString() }, { status: 200 });
       }
     }
-    const solutions = await analyzeSolutions(region);
+    const result = await analyzeSolutions(region);
+    const solutions = result.solutions;
     await setCache(cacheKey, solutions, FACTORS_CACHE_MS);
-    return Response.json({ solutions, region, scope, count: solutions.length, aiCurated: true, cacheKey, updatedAt: new Date().toISOString() }, { status: 200 });
+    const aiCurated = !(result.aiUnavailable || result.aiReturnedEmpty);
+    return Response.json({ solutions, region, scope, count: solutions.length, aiCurated, cacheKey, updatedAt: new Date().toISOString() }, { status: 200 });
   } catch (error) {
     console.error("Regional solutions error:", sanitizeError(String(error)));
     const regionParam = new URL(req.url).searchParams.get("region");

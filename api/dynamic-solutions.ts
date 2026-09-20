@@ -141,17 +141,28 @@ async function analyzeSolutions(scope: RegionId): Promise<Solution[]> {
   const factors = (await getCache<Factor[]>(`dynamic-factors:${scope}`, FACTORS_CACHE_MS)) ?? [];
   const news = await fetchNews(scope);
   const systemPrompt = scope === "global"
-    ? "You are a Senior Commodity Risk Analyst and Supply Chain Strategist. Based on current global market factors, analytics, and news excerpts, generate exactly 3 actionable solution recommendations for global oil, electricity, and water market participants. Each solution must be tied to a specific factor/trend, include the concrete action to take, and describe expected impact. Solutions must be AI-generated and dynamic — no static or hardcoded solutions are permitted. Return strict JSON only (no markdown)."
-    : `You are a Senior Commodity Risk Analyst specializing in ${REGION_NAMES[scope as Region]} energy and water markets. Based on current ${REGION_NAMES[scope as Region]}-specific market factors, analytics, and news excerpts, generate exactly 3 actionable solution recommendations for ${REGION_NAMES[scope as Region]} oil, electricity, and water market participants. Each solution must be tied to a specific factor/trend, include the concrete action to take, and describe expected impact. Solutions must be AI-generated and dynamic — no static or hardcoded solutions are permitted. Return strict JSON only (no markdown).`;
+    ? "You are a Senior Commodity Risk Analyst and Supply Chain Strategist. Based on current global market factors, analytics, and news excerpts, generate exactly 3 actionable solution recommendations for global oil, electricity, and water market participants. Each solution must be tied to a specific factor/trend, include the concrete action to take, and describe expected impact. Solutions must be AI-generated and dynamic — no static or hardcoded solutions are permitted. For regions with insufficient regional news, generate solutions based on global trends that have cross-regional relevance. Return strict JSON only (no markdown)."
+    : `You are a Senior Commodity Risk Analyst specializing in ${REGION_NAMES[scope as Region]} energy and water markets. Based on current ${REGION_NAMES[scope as Region]}-specific market factors, analytics, and news excerpts, generate exactly 3 actionable solution recommendations for ${REGION_NAMES[scope as Region]} oil, electricity, and water market participants. Each solution must be tied to a specific factor/trend, include the concrete action to take, and describe expected impact. Solutions must be AI-generated and dynamic — no static or hardcoded solutions are permitted. If regional news is limited, draw on global factors that impact ${REGION_NAMES[scope as Region]} and generate regionally-appropriate solutions. Return strict JSON only (no markdown).`;
   const payload = { messages: [{ role: "system", content: systemPrompt }, { role: "user", content: JSON.stringify({ analytics, factors: factors.map((f: Factor) => ({ name: f.name, explanation: f.explanation, direction: f.direction, magnitude: f.magnitude, commodities: f.commodities, importanceScore: f.importanceScore })), news: news.map((n) => ({ title: n.title, source: n.url, snippet: n.snippet?.slice(0, 2000) })) }) }] };
-  const response = await kiloRouter.kiloInfer({ ...payload, max_tokens: 4096, temperature: 0.2 });
-  const content = response.choices?.[0]?.message?.content ?? "";
-const parsed = safeParseJson<{ solutions?: unknown[] }>(content);
-const rawSolutions = parsed?.solutions ?? [];
-if (!rawSolutions || rawSolutions.length === 0) return buildFallbackSolutions(scope);
-const normalized = rawSolutions.map((s) => normalizeSolution(s, scope)).filter((s): s is Solution => s !== null);
-if (!normalized || normalized.length === 0) return buildFallbackSolutions(scope);
-  return replaceOldest(current ?? [], normalized);
+  let response: unknown;
+  try {
+    response = await kiloRouter.kiloInfer({ ...payload, max_tokens: 4096, temperature: 0.2 });
+  } catch (err) {
+    // AI genuinely unavailable — return fallback with explicit attribution
+    return { solutions: buildFallbackSolutions(scope), aiUnavailable: true };
+  }
+  const content = (response as { choices?: Array<{ message?: { content?: string } }> })?.choices?.[0]?.message?.content ?? "";
+  const parsed = safeParseJson<{ solutions?: unknown[] }>(content);
+  const rawSolutions = parsed?.solutions ?? [];
+  if (!rawSolutions || rawSolutions.length === 0) {
+    // AI responded but returned no solutions — still use fallback, but distinguish cause
+    return { solutions: buildFallbackSolutions(scope), aiReturnedEmpty: true };
+  }
+  const normalized = rawSolutions.map((s) => normalizeSolution(s, scope)).filter((s): s is Solution => s !== null);
+  if (!normalized || normalized.length === 0) {
+    return { solutions: buildFallbackSolutions(scope), aiReturnedEmpty: true };
+  }
+  return { solutions: replaceOldest(current ?? [], normalized), aiUnavailable: false, aiReturnedEmpty: false };
 }
 
 export default async function handler(req: Request): Promise<Response> {
@@ -164,9 +175,11 @@ export default async function handler(req: Request): Promise<Response> {
     }
     const cacheKey = `dynamic-solutions:${scope}`;
     if (!force) { const cached = await getCache<Solution[]>(cacheKey, FACTORS_CACHE_MS); if (cached && cached.length > 0) return Response.json({ solutions: cached, scope, count: cached.length, aiCurated: true, cacheKey, updatedAt: new Date().toISOString() }, { status: 200 }); }
-    const solutions = await analyzeSolutions(scope);
+    const result = await analyzeSolutions(scope);
+    const solutions = result.solutions;
     await setCache(cacheKey, solutions, FACTORS_CACHE_MS);
-    return Response.json({ solutions, scope, count: solutions.length, aiCurated: true, cacheKey, updatedAt: new Date().toISOString() }, { status: 200 });
+    const aiCurated = !(result.aiUnavailable || result.aiReturnedEmpty);
+    return Response.json({ solutions, scope, count: solutions.length, aiCurated, cacheKey, updatedAt: new Date().toISOString() }, { status: 200 });
   } catch (error) {
     console.error("Dynamic solutions error:", sanitizeError(String(error)));
     return Response.json({ error: sanitizeError(String(error)), solutions: buildFallbackSolutions(scope), scope, count: 3, aiCurated: false, updatedAt: new Date().toISOString() }, { status: 200 });

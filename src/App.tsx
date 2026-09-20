@@ -130,39 +130,71 @@ export default function App() {
     return () => { active = false; clearInterval(id); };
   }, []);
 
-  // Poll dynamic solutions (global + regional) — refresh via force=true query param
-  useEffect(() => {
-    let active = true;
-    const pollSolutions = async () => {
-      setSolutionsLoading(true);
-      try {
-        const res = await fetch("/api/dynamic-solutions?force=true");
-        if (res.ok) {
-          const data = await res.json();
-          if (active && Array.isArray(data.solutions) && data.solutions.length > 0) {
-            setGlobalSolutions(data.solutions);
-            setSolutionsAiCurated(data.aiCurated === true);
-          }
+  // Fetch solutions from API - used for initial load and manual refresh
+  const fetchLiveSolutions = useCallback(async () => {
+    setSolutionsLoading(true);
+    try {
+      // Fetch global solutions
+      const globalRes = await fetch("/api/dynamic-solutions?force=true");
+      if (globalRes.ok) {
+        const data = await globalRes.json();
+        if (Array.isArray(data.solutions) && data.solutions.length > 0) {
+          setGlobalSolutions(data.solutions);
+          setSolutionsAiCurated(data.aiCurated === true);
         }
-      } catch { /* ignore */ }
+      }
+      // Fetch regional solutions with stagger
       for (const r of EVAL_REGIONS) {
         try {
           const res = await fetch(`/api/regional-solutions?region=${r.id}&force=true`);
           if (res.ok) {
             const data = await res.json();
-            if (active && Array.isArray(data.solutions) && data.solutions.length > 0) {
+            if (Array.isArray(data.solutions) && data.solutions.length > 0) {
               setRegionalSolutions(prev => ({ ...prev, [r.id]: data.solutions }));
             }
           }
         } catch { /* ignore */ }
         await new Promise(r => setTimeout(r, REGION_STAGGER_MS));
       }
+    } catch { /* ignore */ }
+    finally {
       setSolutionsLoading(false);
+    }
+  }, []);
+
+  // Poll dynamic solutions (global + regional) — background refresh
+  useEffect(() => {
+    let active = true;
+    const pollSolutions = async () => {
+      try {
+        const res = await fetch("/api/dynamic-solutions?force=true");
+        if (res.ok && active) {
+          const data = await res.json();
+          if (Array.isArray(data.solutions) && data.solutions.length > 0) {
+            setGlobalSolutions(data.solutions);
+            setSolutionsAiCurated(data.aiCurated === true);
+          }
+        }
+        for (const r of EVAL_REGIONS) {
+          try {
+            const res = await fetch(`/api/regional-solutions?region=${r.id}&force=true`);
+            if (res.ok && active) {
+              const data = await res.json();
+              if (Array.isArray(data.solutions) && data.solutions.length > 0) {
+                setRegionalSolutions(prev => ({ ...prev, [r.id]: data.solutions }));
+              }
+            }
+          } catch { /* ignore */ }
+          await new Promise(r => setTimeout(r, REGION_STAGGER_MS));
+        }
+      } catch { /* ignore */ }
     };
-    pollSolutions();
+    // Initial fetch
+    fetchLiveSolutions();
+    // Background polling
     const id = setInterval(pollSolutions, SOLUTIONS_POLL_MS);
     return () => { active = false; clearInterval(id); };
-  }, []);
+  }, [fetchLiveSolutions]);
 
   return (
     <div className="min-h-screen bg-base font-sans text-slate-200 antialiased">
@@ -176,7 +208,7 @@ export default function App() {
           points={points}
           lastUpdated={lastUpdated}
           onRefresh={refresh}
-          onFetchWater={handleFetchWater}
+          onFetchWater={fetchWater}
           waterFetching={waterFetching}
           waterLive={waterLive}
           isLive={isLive}
@@ -204,10 +236,7 @@ export default function App() {
           regionalSolutions={regionalSolutions}
           loading={solutionsLoading}
           aiCurated={solutionsAiCurated}
-          onRefresh={() => {
-            setSolutionsLoading(true);
-            setTimeout(() => setSolutionsLoading(false), 5000);
-          }}
+          onRefresh={fetchLiveSolutions}
         />
         <AboutSection />
       </main>
