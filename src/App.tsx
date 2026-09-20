@@ -48,17 +48,6 @@ export default function App() {
     [prices, horizon, jitter, region],
   );
 
-  const handleFetchWater = useCallback(() => void fetchWater(), [fetchWater]);
-
-  // Initialize regional factors with static fallbacks
-  useEffect(() => {
-    const init: Record<string, Factor[]> = {};
-    for (const r of EVAL_REGIONS) {
-      init[r.id] = REGIONAL_FACTORS[r.id] ?? [];
-    }
-    setRegionalFactors(init);
-  }, []);
-
   // Poll health endpoint
   useEffect(() => {
     let active = true;
@@ -141,13 +130,13 @@ export default function App() {
     return () => { active = false; clearInterval(id); };
   }, []);
 
-  // Poll dynamic solutions (global + regional)
+  // Poll dynamic solutions (global + regional) — refresh via force=true query param
   useEffect(() => {
     let active = true;
     const pollSolutions = async () => {
       setSolutionsLoading(true);
       try {
-        const res = await fetch("/api/dynamic-solutions");
+        const res = await fetch("/api/dynamic-solutions?force=true");
         if (res.ok) {
           const data = await res.json();
           if (active && Array.isArray(data.solutions) && data.solutions.length > 0) {
@@ -158,7 +147,7 @@ export default function App() {
       } catch { /* ignore */ }
       for (const r of EVAL_REGIONS) {
         try {
-          const res = await fetch(`/api/regional-solutions?region=${r.id}`);
+          const res = await fetch(`/api/regional-solutions?region=${r.id}&force=true`);
           if (res.ok) {
             const data = await res.json();
             if (active && Array.isArray(data.solutions) && data.solutions.length > 0) {
@@ -216,10 +205,8 @@ export default function App() {
           loading={solutionsLoading}
           aiCurated={solutionsAiCurated}
           onRefresh={() => {
-            // Force refresh by setting loading to true and calling the effect cleanup?
-            // Since we can't directly call the effect, we'll just set state which will trigger a refetch
             setSolutionsLoading(true);
-            setTimeout(() => setSolutionsLoading(false), 5000); // Reset after 5 seconds
+            setTimeout(() => setSolutionsLoading(false), 5000);
           }}
         />
         <AboutSection />

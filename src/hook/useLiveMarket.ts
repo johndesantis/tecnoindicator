@@ -10,6 +10,32 @@ import {
   type LiveWaterQuote,
 } from "../lib/model";
 
+interface LivePriceQuote {
+  price: number;
+  unit: string;
+  source: string;
+  asOf: string;
+  isLive: boolean;
+}
+
+async function fetchLivePricesFromAPI(): Promise<Record<CommodityId, number> | null> {
+  try {
+    const res = await fetch("/api/dynamic-prices");
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data.prices) return null;
+    const prices: Record<CommodityId, number> = {
+      oil: data.prices.oil?.price ?? 0,
+      electricity: data.prices.electricity?.price ?? 0,
+      water: data.prices.water?.price ?? 0,
+    };
+    if (prices.oil === 0 || prices.electricity === 0 || prices.water === 0) return null;
+    return prices;
+  } catch {
+    return null;
+  }
+}
+
 function getInitialPrices(): Record<CommodityId, number> {
   return Object.fromEntries(COMMODITIES.map((c) => [c.id, c.base])) as Record<
     CommodityId,
@@ -27,11 +53,13 @@ export interface UseLiveMarketReturn {
   streaming: boolean;
   refresh: () => void;
   fetchWater: () => Promise<void>;
+  fetchLivePrices: () => Promise<void>;
   toggleLive: () => void;
 }
 
 export function useLiveMarket(): UseLiveMarketReturn {
   const [prices, setPrices] = useState<Record<CommodityId, number>>(getInitialPrices);
+  const [pricesLoading, setPricesLoading] = useState(false);
   const [jitter, setJitter] = useState(0);
   const [lastUpdated, setLastUpdated] = useState(() => new Date());
   const [waterLive, setWaterLive] = useState<LiveWaterQuote | null>(null);
@@ -40,6 +68,21 @@ export function useLiveMarket(): UseLiveMarketReturn {
   const [streaming, setStreaming] = useState(true);
   const tickRef = useRef<number | null>(null);
   const waterRef = useRef<number | null>(null);
+
+  const fetchLivePrices = useCallback(async () => {
+    setPricesLoading(true);
+    try {
+      const livePrices = await fetchLivePricesFromAPI();
+      if (livePrices) {
+        setPrices(livePrices);
+        setLastUpdated(new Date());
+      }
+    } catch (err) {
+      console.error("Failed to fetch live prices:", err);
+    } finally {
+      setPricesLoading(false);
+    }
+  }, []);
 
   const refresh = useCallback(() => {
     setPrices((cur) => perturbPrices(cur));
@@ -119,6 +162,12 @@ export function useLiveMarket(): UseLiveMarketReturn {
     };
   }, [isLive]);
 
+  // Initial: fetch live prices from API (fall back to hardcoded base prices on failure)
+  useEffect(() => {
+    void fetchLivePrices();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Initial water quote
   useEffect(() => {
     void fetchWater();
@@ -135,6 +184,7 @@ export function useLiveMarket(): UseLiveMarketReturn {
     streaming,
     refresh,
     fetchWater,
+    fetchLivePrices,
     toggleLive,
   };
 }
