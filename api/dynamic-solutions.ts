@@ -146,9 +146,11 @@ async function analyzeSolutions(scope: RegionId): Promise<Solution[]> {
   const payload = { messages: [{ role: "system", content: systemPrompt }, { role: "user", content: JSON.stringify({ analytics, factors: factors.map((f: Factor) => ({ name: f.name, explanation: f.explanation, direction: f.direction, magnitude: f.magnitude, commodities: f.commodities, importanceScore: f.importanceScore })), news: news.map((n) => ({ title: n.title, source: n.url, snippet: n.snippet?.slice(0, 2000) })) }) }] };
   const response = await kiloRouter.kiloInfer({ ...payload, max_tokens: 4096, temperature: 0.2 });
   const content = response.choices?.[0]?.message?.content ?? "";
-  const parsed = safeParseJson<{ solutions?: unknown[] }>(content);
-  if (!parsed?.solutions) return buildFallbackSolutions(scope);
-  const normalized = parsed.solutions.map((s) => normalizeSolution(s, scope)).filter((s): s is Solution => s !== null);
+const parsed = safeParseJson<{ solutions?: unknown[] }>(content);
+const rawSolutions = parsed?.solutions ?? [];
+if (!rawSolutions || rawSolutions.length === 0) return buildFallbackSolutions(scope);
+const normalized = rawSolutions.map((s) => normalizeSolution(s, scope)).filter((s): s is Solution => s !== null);
+if (!normalized || normalized.length === 0) return buildFallbackSolutions(scope);
   return replaceOldest(current ?? [], normalized);
 }
 
