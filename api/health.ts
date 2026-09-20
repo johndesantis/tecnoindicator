@@ -45,10 +45,33 @@ interface HealthResponse {
   };
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`timeout after ${ms}ms`)), ms)
+    ),
+  ]);
+}
+
 export default async function handler(_req: Request): Promise<Response> {
   try {
-    const kiloStatus = await kiloRouter.getKiloStatus();
-    const tinyfishStatus = await tinyfishRouter.getTinyfishStatus();
+    const kiloStatus = await withTimeout(kiloRouter.getKiloStatus(), 5000).catch(() => ({
+      available: false,
+      configuredKeys: 0,
+      usableKeys: 0,
+      zeroCostModels: [] as string[],
+      rateLimitedKeys: [],
+      rateLimitedModels: [],
+      globalRateLimited: false,
+      catalogLastRefresh: null,
+    }));
+    const tinyfishStatus = await withTimeout(tinyfishRouter.getTinyfishStatus(), 5000).catch(() => ({
+      available: false,
+      configuredKeys: 0,
+      usableKeys: 0,
+      rateLimitedKeys: [],
+    }));
 
     const globalAnalytics = await getGlobalAnalytics();
     const regionalAnalytics: Record<Region, { lastFetch: string | null; success: boolean }> = {} as Record<

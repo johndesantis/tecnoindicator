@@ -4,13 +4,15 @@ import Hero from "./components/Hero";
 import ForecastTool from "./components/ForecastTool";
 import RegionalEvaluation from "./components/RegionalEvaluation";
 import FactorsSection from "./components/FactorsSection";
+import SolutionsSection from "./components/SolutionsSection";
 import AboutSection from "./components/AboutSection";
 import Footer from "./components/Footer";
 import { useLiveMarket } from "./hook/useLiveMarket";
-import { generateForecast, type RegionId, FACTORS, REGIONAL_FACTORS, EVAL_REGIONS, type Factor } from "./lib/model";
+import { generateForecast, type RegionId, FACTORS, EVAL_REGIONS, type Factor, type Solution } from "./lib/model";
 
 const ANALYTICS_POLL_MS = 60_000;
 const FACTORS_POLL_MS = 120_000;
+const SOLUTIONS_POLL_MS = 180_000;
 const HEALTH_POLL_MS = 5 * 60_000;
 const REGION_STAGGER_MS = 8_000;
 
@@ -36,22 +38,15 @@ export default function App() {
   const [globalFactors, setGlobalFactors] = useState<Factor[]>(FACTORS);
   const [regionalFactors, setRegionalFactors] = useState<Record<string, Factor[]>>({});
   const [_regionalAnalytics, setRegionalAnalytics] = useState<Record<string, unknown>>({});
+  const [globalSolutions, setGlobalSolutions] = useState<Solution[]>([]);
+  const [regionalSolutions, setRegionalSolutions] = useState<Record<string, Solution[]>>({});
+  const [solutionsLoading, setSolutionsLoading] = useState(false);
+  const [solutionsAiCurated, setSolutionsAiCurated] = useState(false);
 
   const points = useMemo(
     () => generateForecast(prices, horizon, jitter, region),
     [prices, horizon, jitter, region],
   );
-
-  const handleFetchWater = useCallback(() => void fetchWater(), [fetchWater]);
-
-  // Initialize regional factors with static fallbacks
-  useEffect(() => {
-    const init: Record<string, Factor[]> = {};
-    for (const r of EVAL_REGIONS) {
-      init[r.id] = REGIONAL_FACTORS[r.id] ?? [];
-    }
-    setRegionalFactors(init);
-  }, []);
 
   // Poll health endpoint
   useEffect(() => {
@@ -135,6 +130,72 @@ export default function App() {
     return () => { active = false; clearInterval(id); };
   }, []);
 
+  // Fetch solutions from API - used for initial load and manual refresh
+  const fetchLiveSolutions = useCallback(async () => {
+    setSolutionsLoading(true);
+    try {
+      // Fetch global solutions
+      const globalRes = await fetch("/api/dynamic-solutions?force=true");
+      if (globalRes.ok) {
+        const data = await globalRes.json();
+        if (Array.isArray(data.solutions) && data.solutions.length > 0) {
+          setGlobalSolutions(data.solutions);
+          setSolutionsAiCurated(data.aiCurated === true);
+        }
+      }
+      // Fetch regional solutions with stagger
+      for (const r of EVAL_REGIONS) {
+        try {
+          const res = await fetch(`/api/regional-solutions?region=${r.id}&force=true`);
+          if (res.ok) {
+            const data = await res.json();
+            if (Array.isArray(data.solutions) && data.solutions.length > 0) {
+              setRegionalSolutions(prev => ({ ...prev, [r.id]: data.solutions }));
+            }
+          }
+        } catch { /* ignore */ }
+        await new Promise(r => setTimeout(r, REGION_STAGGER_MS));
+      }
+    } catch { /* ignore */ }
+    finally {
+      setSolutionsLoading(false);
+    }
+  }, []);
+
+  // Poll dynamic solutions (global + regional) — background refresh
+  useEffect(() => {
+    let active = true;
+    const pollSolutions = async () => {
+      try {
+        const res = await fetch("/api/dynamic-solutions?force=true");
+        if (res.ok && active) {
+          const data = await res.json();
+          if (Array.isArray(data.solutions) && data.solutions.length > 0) {
+            setGlobalSolutions(data.solutions);
+            setSolutionsAiCurated(data.aiCurated === true);
+          }
+        }
+        for (const r of EVAL_REGIONS) {
+          try {
+            const res = await fetch(`/api/regional-solutions?region=${r.id}&force=true`);
+            if (res.ok && active) {
+              const data = await res.json();
+              if (Array.isArray(data.solutions) && data.solutions.length > 0) {
+                setRegionalSolutions(prev => ({ ...prev, [r.id]: data.solutions }));
+              }
+            }
+          } catch { /* ignore */ }
+          await new Promise(r => setTimeout(r, REGION_STAGGER_MS));
+        }
+      } catch { /* ignore */ }
+    };
+    // Initial fetch
+    fetchLiveSolutions();
+    // Background polling
+    const id = setInterval(pollSolutions, SOLUTIONS_POLL_MS);
+    return () => { active = false; clearInterval(id); };
+  }, [fetchLiveSolutions]);
+
   return (
     <div className="min-h-screen bg-base font-sans text-slate-200 antialiased">
       <Navbar />
@@ -147,7 +208,7 @@ export default function App() {
           points={points}
           lastUpdated={lastUpdated}
           onRefresh={refresh}
-          onFetchWater={handleFetchWater}
+          onFetchWater={fetchWater}
           waterFetching={waterFetching}
           waterLive={waterLive}
           isLive={isLive}
@@ -169,6 +230,13 @@ export default function App() {
           horizon={horizon}
           dynamicFactors={globalFactors}
           healthStatus={healthStatus}
+        />
+        <SolutionsSection
+          globalSolutions={globalSolutions}
+          regionalSolutions={regionalSolutions}
+          loading={solutionsLoading}
+          aiCurated={solutionsAiCurated}
+          onRefresh={fetchLiveSolutions}
         />
         <AboutSection />
       </main>

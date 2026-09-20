@@ -5,7 +5,8 @@ import { getGlobalAnalytics, getRegionalAnalytics } from "../_shared/determinist
 import { FACTORS_CACHE_MS } from "../_shared/http.js";
 import { getCache, setCache } from "../_shared/cache.js";
 import { safeParseJson, sanitizeError } from "../_shared/validation.js";
-import type { Factor } from "../_shared/types.js";
+import type { Factor, Solution, RegionId } from "../_shared/types.js";
+import { runSolutionAnalysis } from "../_shared/solutions.js";
 
 const MAX_FACTORS = 8;
 const REGIONS: Region[] = ["asia", "europe", "africa", "americas", "oceania"];
@@ -257,6 +258,12 @@ async function runFactorAnalysis(scope: "global" | Region, region: Region | null
   return replaceOldest(existing, normalized);
 }
 
+async function runSolutionCuration(scope: RegionId, region: Region | null): Promise<Solution[]> {
+  const factors =
+    (await getCache<Factor[]>(`dynamic-factors:${scope}`, FACTORS_CACHE_MS)) ?? [];
+  return runSolutionAnalysis(scope, region, factors);
+}
+
 export default async function handler(_req: Request): Promise<Response> {
   try {
     const results: Record<string, { success: boolean; count: number; error?: string }> = {};
@@ -271,7 +278,17 @@ export default async function handler(_req: Request): Promise<Response> {
       results.global = { success: false, count: 0, error: sanitizeError(String(error)) };
     }
 
-    // Curate regional factors for all regions
+    // Curate global solutions
+    try {
+      const globalSolutions = await runSolutionCuration("global", null);
+      const cacheKey = `dynamic-solutions:global`;
+      await setCache(cacheKey, globalSolutions, FACTORS_CACHE_MS);
+      results["global-solutions"] = { success: true, count: globalSolutions.length };
+    } catch (error) {
+      results["global-solutions"] = { success: false, count: 0, error: sanitizeError(String(error)) };
+    }
+
+    // Curate regional factors and solutions for all regions
     for (const region of REGIONS) {
       try {
         const regionalFactors = await runFactorAnalysis(region, region);
@@ -280,6 +297,14 @@ export default async function handler(_req: Request): Promise<Response> {
         results[region] = { success: true, count: regionalFactors.length };
       } catch (error) {
         results[region] = { success: false, count: 0, error: sanitizeError(String(error)) };
+      }
+      try {
+        const regionalSolutions = await runSolutionCuration(region, region);
+        const cacheKey = `dynamic-solutions:${region}`;
+        await setCache(cacheKey, regionalSolutions, FACTORS_CACHE_MS);
+        results[`${region}-solutions`] = { success: true, count: regionalSolutions.length };
+      } catch (error) {
+        results[`${region}-solutions`] = { success: false, count: 0, error: sanitizeError(String(error)) };
       }
     }
 
