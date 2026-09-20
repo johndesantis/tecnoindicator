@@ -4,6 +4,20 @@ export type RegionId = Region | "global";
 
 export type CommodityId = "oil" | "electricity" | "water";
 
+export interface Solution {
+  id: string;
+  region: RegionId;
+  title: string;
+  description: string;
+  category: string;
+  commodities: CommodityId[];
+  basedOnFactor: string;
+  action: string;
+  expectedImpact: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Factor {
   id: string;
   name: string;
