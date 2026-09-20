@@ -4,13 +4,15 @@ import Hero from "./components/Hero";
 import ForecastTool from "./components/ForecastTool";
 import RegionalEvaluation from "./components/RegionalEvaluation";
 import FactorsSection from "./components/FactorsSection";
+import SolutionsSection from "./components/SolutionsSection";
 import AboutSection from "./components/AboutSection";
 import Footer from "./components/Footer";
 import { useLiveMarket } from "./hook/useLiveMarket";
-import { generateForecast, type RegionId, FACTORS, REGIONAL_FACTORS, EVAL_REGIONS, type Factor } from "./lib/model";
+import { generateForecast, type RegionId, FACTORS, REGIONAL_FACTORS, EVAL_REGIONS, type Factor, type Solution } from "./lib/model";
 
 const ANALYTICS_POLL_MS = 60_000;
 const FACTORS_POLL_MS = 120_000;
+const SOLUTIONS_POLL_MS = 180_000;
 const HEALTH_POLL_MS = 5 * 60_000;
 const REGION_STAGGER_MS = 8_000;
 
@@ -36,6 +38,10 @@ export default function App() {
   const [globalFactors, setGlobalFactors] = useState<Factor[]>(FACTORS);
   const [regionalFactors, setRegionalFactors] = useState<Record<string, Factor[]>>({});
   const [_regionalAnalytics, setRegionalAnalytics] = useState<Record<string, unknown>>({});
+  const [globalSolutions, setGlobalSolutions] = useState<Solution[]>([]);
+  const [regionalSolutions, setRegionalSolutions] = useState<Record<string, Solution[]>>({});
+  const [solutionsLoading, setSolutionsLoading] = useState(false);
+  const [solutionsAiCurated, setSolutionsAiCurated] = useState(false);
 
   const points = useMemo(
     () => generateForecast(prices, horizon, jitter, region),
@@ -135,6 +141,40 @@ export default function App() {
     return () => { active = false; clearInterval(id); };
   }, []);
 
+  // Poll dynamic solutions (global + regional)
+  useEffect(() => {
+    let active = true;
+    const pollSolutions = async () => {
+      setSolutionsLoading(true);
+      try {
+        const res = await fetch("/api/dynamic-solutions");
+        if (res.ok) {
+          const data = await res.json();
+          if (active && Array.isArray(data.solutions) && data.solutions.length > 0) {
+            setGlobalSolutions(data.solutions);
+            setSolutionsAiCurated(data.aiCurated === true);
+          }
+        }
+      } catch { /* ignore */ }
+      for (const r of EVAL_REGIONS) {
+        try {
+          const res = await fetch(`/api/regional-solutions?region=${r.id}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (active && Array.isArray(data.solutions) && data.solutions.length > 0) {
+              setRegionalSolutions(prev => ({ ...prev, [r.id]: data.solutions }));
+            }
+          }
+        } catch { /* ignore */ }
+        await new Promise(r => setTimeout(r, REGION_STAGGER_MS));
+      }
+      setSolutionsLoading(false);
+    };
+    pollSolutions();
+    const id = setInterval(pollSolutions, SOLUTIONS_POLL_MS);
+    return () => { active = false; clearInterval(id); };
+  }, []);
+
   return (
     <div className="min-h-screen bg-base font-sans text-slate-200 antialiased">
       <Navbar />
@@ -169,6 +209,18 @@ export default function App() {
           horizon={horizon}
           dynamicFactors={globalFactors}
           healthStatus={healthStatus}
+        />
+        <SolutionsSection
+          globalSolutions={globalSolutions}
+          regionalSolutions={regionalSolutions}
+          loading={solutionsLoading}
+          aiCurated={solutionsAiCurated}
+          onRefresh={() => {
+            // Force refresh by setting loading to true and calling the effect cleanup?
+            // Since we can't directly call the effect, we'll just set state which will trigger a refetch
+            setSolutionsLoading(true);
+            setTimeout(() => setSolutionsLoading(false), 5000); // Reset after 5 seconds
+          }}
         />
         <AboutSection />
       </main>
