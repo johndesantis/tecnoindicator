@@ -41,7 +41,7 @@ function getFallbackPrices(): Record<CommodityId, number> {
   return Object.fromEntries(COMMODITIES.map((c) => [c.id, c.base])) as Record<
     CommodityId,
     number
-  >;
+ >;
 }
 
 export interface UseLiveMarketReturn {
@@ -62,7 +62,8 @@ export interface UseLiveMarketReturn {
 }
 
 export function useLiveMarket(): UseLiveMarketReturn {
-  const [prices, setPrices] = useState<Record<CommodityId, number>>({} as Record<CommodityId, number>);
+  const initialPrices = getFallbackPrices();
+  const [prices, setPrices] = useState<Record<CommodityId, number>>(initialPrices);
   const [pricesLoading, setPricesLoading] = useState(true);
   const [pricesSource, setPricesSource] = useState("");
   const [pricesAsOf, setPricesAsOf] = useState<string | null>(null);
