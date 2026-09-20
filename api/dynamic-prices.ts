@@ -1,7 +1,6 @@
 import { kiloRouter } from "./_shared/kiloRouter.js";
 import { tinyfishRouter } from "./_shared/tinyfishRouter.js";
 import { getCache, setCache } from "./_shared/cache.js";
-import { FACTORS_CACHE_MS } from "./_shared/http.js";
 import { safeParseJson, sanitizeError } from "./_shared/validation.js";
 import type { CommodityId, RegionId } from "./_shared/types.js";
 
@@ -67,7 +66,7 @@ interface PriceExtraction {
   unit: string | null;
 }
 
-function extractPriceFromText(text: string, commodity: CommodityId): number | null {
+function extractPriceFromText(text: string): number | null {
   const patterns = [
     /\$\s*(\d+(?:\.\d+)?)[\s]*(?:per|\/|a)\s*(?:bbl|barrel|barrels|megawatt[- ]hour|megawatt hour|mwh|cubic meter|m3|tonne|ton)/gi,
     /\$\s*(\d+(?:\.\d+)?)[\s]*(?:bbl|barrel|barrels|mwh|megawatt[- ]hour|m3|cubic meter|tonne|ton)/gi,
@@ -93,7 +92,7 @@ async function extractPriceFromSearchResults(
     .map((r) => `${r.title}. ${r.snippet}`)
     .join("\n");
 
-  const directPrice = extractPriceFromText(text, commodity);
+  const directPrice = extractPriceFromText(text);
   if (directPrice !== null) {
     return { price: directPrice, unit: PRICE_UNITS[commodity] };
   }

@@ -135,7 +135,7 @@ async function fetchNews(scope: RegionId): Promise<Array<{ title: string; url: s
   return candidates.slice(0, 8);
 }
 
-async function analyzeSolutions(scope: RegionId): Promise<Solution[]> {
+async function analyzeSolutions(scope: RegionId): Promise<{ solutions: Solution[]; aiUnavailable: boolean; aiReturnedEmpty: boolean }> {
   const current = await getCache<Solution[]>(`dynamic-solutions:${scope}`, FACTORS_CACHE_MS);
   const analytics = scope === "global" ? await getGlobalAnalytics() : await getRegionalAnalytics(scope as Region);
   const factors = (await getCache<Factor[]>(`dynamic-factors:${scope}`, FACTORS_CACHE_MS)) ?? [];
@@ -149,18 +149,18 @@ async function analyzeSolutions(scope: RegionId): Promise<Solution[]> {
     response = await kiloRouter.kiloInfer({ ...payload, max_tokens: 4096, temperature: 0.2 });
   } catch (err) {
     // AI genuinely unavailable — return fallback with explicit attribution
-    return { solutions: buildFallbackSolutions(scope), aiUnavailable: true };
+    return { solutions: buildFallbackSolutions(scope), aiUnavailable: true, aiReturnedEmpty: false };
   }
   const content = (response as { choices?: Array<{ message?: { content?: string } }> })?.choices?.[0]?.message?.content ?? "";
   const parsed = safeParseJson<{ solutions?: unknown[] }>(content);
   const rawSolutions = parsed?.solutions ?? [];
   if (!rawSolutions || rawSolutions.length === 0) {
     // AI responded but returned no solutions — still use fallback, but distinguish cause
-    return { solutions: buildFallbackSolutions(scope), aiReturnedEmpty: true };
+    return { solutions: buildFallbackSolutions(scope), aiUnavailable: false, aiReturnedEmpty: true };
   }
   const normalized = rawSolutions.map((s) => normalizeSolution(s, scope)).filter((s): s is Solution => s !== null);
   if (!normalized || normalized.length === 0) {
-    return { solutions: buildFallbackSolutions(scope), aiReturnedEmpty: true };
+    return { solutions: buildFallbackSolutions(scope), aiUnavailable: false, aiReturnedEmpty: true };
   }
   return { solutions: replaceOldest(current ?? [], normalized), aiUnavailable: false, aiReturnedEmpty: false };
 }

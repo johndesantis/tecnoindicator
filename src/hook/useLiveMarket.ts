@@ -62,7 +62,7 @@ export interface UseLiveMarketReturn {
 }
 
 export function useLiveMarket(): UseLiveMarketReturn {
-  const [prices, setPrices] = useState<Record<CommodityId, number>>({});
+  const [prices, setPrices] = useState<Record<CommodityId, number>>({} as Record<CommodityId, number>);
   const [pricesLoading, setPricesLoading] = useState(true);
   const [pricesSource, setPricesSource] = useState("");
   const [pricesAsOf, setPricesAsOf] = useState<string | null>(null);

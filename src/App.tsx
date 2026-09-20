@@ -8,7 +8,7 @@ import SolutionsSection from "./components/SolutionsSection";
 import AboutSection from "./components/AboutSection";
 import Footer from "./components/Footer";
 import { useLiveMarket } from "./hook/useLiveMarket";
-import { generateForecast, type RegionId, FACTORS, REGIONAL_FACTORS, EVAL_REGIONS, type Factor, type Solution } from "./lib/model";
+import { generateForecast, type RegionId, FACTORS, EVAL_REGIONS, type Factor, type Solution } from "./lib/model";
 
 const ANALYTICS_POLL_MS = 60_000;
 const FACTORS_POLL_MS = 120_000;
