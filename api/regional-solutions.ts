@@ -5,7 +5,7 @@ import { getRegionalAnalytics } from "./_shared/deterministicAnalytics.js";
 import { FACTORS_CACHE_MS } from "./_shared/http.js";
 import { getCache, setCache } from "./_shared/cache.js";
 import { safeParseJson, sanitizeError } from "./_shared/validation.js";
-import type { Solution, RegionId } from "./_shared/types.js";
+import type { Solution, RegionId, Factor } from "./_shared/types.js";
 import { buildFallbackSolutions } from "./_shared/solutions.js";
 
 const MAX_SOLUTIONS = 3;
@@ -116,15 +116,15 @@ async function analyzeSolutions(region: Region): Promise<Solution[]> {
   const cacheKey = `dynamic-solutions:${scope}`;
   const current = await getCache<Solution[]>(cacheKey, FACTORS_CACHE_MS);
   const analytics = await getRegionalAnalytics(region);
-  const factors = (await getCache<any[]>(`dynamic-factors:${scope}`, FACTORS_CACHE_MS)) ?? [];
+  const factors = (await getCache<Factor[]>(`dynamic-factors:${scope}`, FACTORS_CACHE_MS)) ?? [];
   const news = await fetchNews(region);
   const systemPrompt = SYSTEM_PROMPT_REGIONAL(REGION_NAMES[region]);
-  const payload = { messages: [{ role: "system", content: systemPrompt }, { role: "user", content: JSON.stringify({ analytics, factors: factors.map((f: any) => ({ name: f.name, explanation: f.explanation, direction: f.direction, magnitude: f.magnitude, commodities: f.commodities, importanceScore: f.importanceScore })), news: news.map((n) => ({ title: n.title, source: n.url, snippet: n.snippet?.slice(0, 2000) })) })] } };
+  const payload = { messages: [{ role: "system", content: systemPrompt }, { role: "user", content: JSON.stringify({ analytics, factors: factors.map((f: Factor) => ({ name: f.name, explanation: f.explanation, direction: f.direction, magnitude: f.magnitude, commodities: f.commodities, importanceScore: f.importanceScore })), news: news.map((n) => ({ title: n.title, source: n.url, snippet: n.snippet?.slice(0, 2000) })) }) }] };
   const response = await kiloRouter.kiloInfer({ ...payload, max_tokens: 4096, temperature: 0.2 });
   const content = response.choices?.[0]?.message?.content ?? "";
   const parsed = safeParseJson<{ solutions?: unknown[] }>(content);
   if (!parsed?.solutions) return buildFallbackSolutions(scope);
-  const normalized = parsed.solutions.map((s: unknown) => normalizeSolution(s, scope)).filter(Boolean) as Solution[];
+  const normalized = parsed.solutions.map((s) => normalizeSolution(s, scope)).filter((s): s is Solution => s !== null);
   return replaceOldest(current ?? [], normalized);
 }
 

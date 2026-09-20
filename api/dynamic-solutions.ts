@@ -5,7 +5,7 @@ import { getGlobalAnalytics, getRegionalAnalytics } from "./_shared/deterministi
 import { FACTORS_CACHE_MS } from "./_shared/http.js";
 import { getCache, setCache } from "./_shared/cache.js";
 import { safeParseJson, sanitizeError } from "./_shared/validation.js";
-import type { Solution, RegionId } from "./_shared/types.js";
+import type { Solution, RegionId, Factor } from "./_shared/types.js";
 import { buildFallbackSolutions } from "./_shared/solutions.js";
 
 export const MAX_SOLUTIONS = 3;
@@ -64,6 +64,13 @@ function isRecentPublishedAt(value: string | undefined): boolean {
   const date = Date.parse(value);
   if (Number.isNaN(date)) return true;
   return date >= Date.now() - 180 * 24 * 60 * 60 * 1000;
+}
+
+function isReputableSource(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return REPUTABLE_HOSTS.some((prefix) => host === prefix || host.endsWith(`.${prefix}`));
+  } catch { return false; }
 }
 
 function normalizeSolution(raw: unknown, scope: RegionId): Solution | null {
@@ -131,25 +138,25 @@ async function fetchNews(scope: RegionId): Promise<Array<{ title: string; url: s
 async function analyzeSolutions(scope: RegionId): Promise<Solution[]> {
   const current = await getCache<Solution[]>(`dynamic-solutions:${scope}`, FACTORS_CACHE_MS);
   const analytics = scope === "global" ? await getGlobalAnalytics() : await getRegionalAnalytics(scope as Region);
-  const factors = (await getCache<any[]>(`dynamic-factors:${scope}`, FACTORS_CACHE_MS)) ?? [];
+  const factors = (await getCache<Factor[]>(`dynamic-factors:${scope}`, FACTORS_CACHE_MS)) ?? [];
   const news = await fetchNews(scope);
   const systemPrompt = scope === "global"
     ? "You are a Senior Commodity Risk Analyst and Supply Chain Strategist. Based on current global market factors, analytics, and news excerpts, generate exactly 3 actionable solution recommendations for global oil, electricity, and water market participants. Each solution must be tied to a specific factor/trend, include the concrete action to take, and describe expected impact. Solutions must be AI-generated and dynamic — no static or hardcoded solutions are permitted. Return strict JSON only (no markdown)."
     : `You are a Senior Commodity Risk Analyst specializing in ${REGION_NAMES[scope as Region]} energy and water markets. Based on current ${REGION_NAMES[scope as Region]}-specific market factors, analytics, and news excerpts, generate exactly 3 actionable solution recommendations for ${REGION_NAMES[scope as Region]} oil, electricity, and water market participants. Each solution must be tied to a specific factor/trend, include the concrete action to take, and describe expected impact. Solutions must be AI-generated and dynamic — no static or hardcoded solutions are permitted. Return strict JSON only (no markdown).`;
-  const payload = { messages: [{ role: "system", content: systemPrompt }, { role: "user", content: JSON.stringify({ analytics, factors: factors.map((f: any) => ({ name: f.name, explanation: f.explanation, direction: f.direction, magnitude: f.magnitude, commodities: f.commodities, importanceScore: f.importanceScore })), news: news.map((n) => ({ title: n.title, source: n.url, snippet: n.snippet?.slice(0, 2000) })) })] } };
+  const payload = { messages: [{ role: "system", content: systemPrompt }, { role: "user", content: JSON.stringify({ analytics, factors: factors.map((f: Factor) => ({ name: f.name, explanation: f.explanation, direction: f.direction, magnitude: f.magnitude, commodities: f.commodities, importanceScore: f.importanceScore })), news: news.map((n) => ({ title: n.title, source: n.url, snippet: n.snippet?.slice(0, 2000) })) }) }] };
   const response = await kiloRouter.kiloInfer({ ...payload, max_tokens: 4096, temperature: 0.2 });
   const content = response.choices?.[0]?.message?.content ?? "";
   const parsed = safeParseJson<{ solutions?: unknown[] }>(content);
   if (!parsed?.solutions) return buildFallbackSolutions(scope);
-  const normalized = parsed.solutions.map((s) => normalizeSolution(s, scope)).filter(Boolean) as Solution[];
+  const normalized = parsed.solutions.map((s) => normalizeSolution(s, scope)).filter((s): s is Solution => s !== null);
   return replaceOldest(current ?? [], normalized);
 }
 
 export default async function handler(req: Request): Promise<Response> {
+  const url = new URL(req.url);
+  const scope = (url.searchParams.get("scope") ?? "global") as RegionId;
   try {
-    const url = new URL(req.url);
     const force = url.searchParams.get("force") === "true";
-    const scope = (url.searchParams.get("scope") ?? "global") as RegionId;
     if (!["global", "asia", "europe", "africa", "americas", "oceania"].includes(scope)) {
       return Response.json({ error: "Invalid scope. Must be one of: global, asia, europe, africa, americas, oceania" }, { status: 400 });
     }
@@ -160,6 +167,6 @@ export default async function handler(req: Request): Promise<Response> {
     return Response.json({ solutions, scope, count: solutions.length, aiCurated: true, cacheKey, updatedAt: new Date().toISOString() }, { status: 200 });
   } catch (error) {
     console.error("Dynamic solutions error:", sanitizeError(String(error)));
-    return Response.json({ error: sanitizeError(String(error)), solutions: buildFallbackSolutions("global"), scope: "global", count: 3, aiCurated: false, updatedAt: new Date().toISOString() }, { status: 200 });
+    return Response.json({ error: sanitizeError(String(error)), solutions: buildFallbackSolutions(scope), scope, count: 3, aiCurated: false, updatedAt: new Date().toISOString() }, { status: 200 });
   }
 }

@@ -9,7 +9,6 @@ import type { Factor, Solution, RegionId } from "../_shared/types.js";
 import { runSolutionAnalysis } from "../_shared/solutions.js";
 
 const MAX_FACTORS = 8;
-const MAX_SOLUTIONS = 3;
 const REGIONS: Region[] = ["asia", "europe", "africa", "americas", "oceania"];
 
 const SYSTEM_PROMPT_GLOBAL =
@@ -257,32 +256,6 @@ async function runFactorAnalysis(scope: "global" | Region, region: Region | null
     .filter((f) => f.scope === scope || (scope === "global" && f.regions?.includes("global")))
     .slice(0, MAX_FACTORS);
   return replaceOldest(existing, normalized);
-}
-
-function buildFallbackSolutions(scope: "global" | Region): Solution[] {
-  const now = new Date().toISOString();
-  const regionName = scope === "global" ? "Global" : REGION_NAMES[scope];
-  const titles: Record<RegionId, string[]> = {
-    global: ["Diversify Supply Sources", "Adjust Procurement Timing", "Hedge Price Volatility"],
-    asia: ["Rebalance Regional Sourcing", "Optimize Shipping Schedules", "Secure Flexible Contracts"],
-    europe: ["Shift to Flexible Suppliers", "Align Inventory with Demand", "Use Forward Contracts"],
-    africa: ["Localize Procurement", "Stagger Delivery Windows", "Monitor Fuel Costs"],
-    americas: ["Reconfigure Transport Routes", "Time Purchases to Cycles", "Lock in Volume Pricing"],
-    oceania: ["Prioritize Local Supply", "Schedule Around Port Windows", "Build Strategic Stockpiles"],
-  };
-  return titles[scope].map((title, index) => ({
-    id: `fallback-solution-${scope}-${index + 1}`,
-    region: scope,
-    title,
-    description: `Dynamic ${regionName.toLowerCase()} solution maintained when AI curation is temporarily unavailable.`,
-    category: index % 2 === 0 ? "Supply Chain" : "Procurement",
-    commodities: ["oil", "electricity", "water"],
-    basedOnFactor: "Current market conditions",
-    action: "Review current supplier and logistics exposure, then adjust timing or routing to reduce price risk.",
-    expectedImpact: "Moderates exposure to short-term price swings while preserving operational flexibility.",
-    createdAt: now,
-    updatedAt: now,
-  }));
 }
 
 async function runSolutionCuration(scope: RegionId, region: Region | null): Promise<Solution[]> {

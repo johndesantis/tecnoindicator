@@ -1,16 +1,14 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import {
-  ArrowDownRight,
   ArrowUpRight,
   Bot,
   Globe2,
   RefreshCw,
   ShieldCheck,
   Sparkles,
-  Zap,
 } from "lucide-react";
 import Reveal from "./Reveal";
-import { COMMODITIES, EVAL_REGIONS, type CommodityId, type RegionId, type Solution } from "../lib/model";
+import { COMMODITIES, EVAL_REGIONS, type RegionId, type Solution } from "../lib/model";
 
 const REGION_ORDER: RegionId[] = ["global", ...EVAL_REGIONS.map((r) => r.id)];
 
@@ -147,8 +145,6 @@ export default function SolutionsSection({
 }) {
   const [selectedRegion, setSelectedRegion] = useState<RegionId>("global");
   const solutions = selectedRegion === "global" ? globalSolutions : regionalSolutions[selectedRegion] ?? [];
-
-  const regionName = selectedRegion === "global" ? "Global" : EVAL_REGIONS.find((r) => r.id === selectedRegion)?.name ?? selectedRegion;
 
   return (
     <section id="solutions" className="border-t border-line bg-base/40 py-20">
