@@ -100,19 +100,17 @@ export class KiloRouter {
     await this.refreshKiloModels(true);
 
     // Probe every configured key against eligible zero-cost models
-    for (const keyState of this.keyStates) {
-      for (const modelCandidate of this.modelCandidates) {
-        if (!modelCandidate.zeroCostVerified || !modelCandidate.available) continue;
-        const probe = await this.probeKeyModel(keyState, modelCandidate);
-        if (probe.success) {
-          keyState.available = true;
-          keyState.inputPrice = probe.inputPrice ?? null;
-          keyState.outputPrice = probe.outputPrice ?? null;
-          keyState.zeroCostVerified = true;
-          keyState.lastCheckedAt = new Date().toISOString();
-          keyState.lastSuccessAt = keyState.lastCheckedAt;
-          break; // One successful model per key is enough
-        }
+    const probes = this.modelCandidates
+      .filter((m) => m.zeroCostVerified && m.available)
+      .flatMap((modelCandidate) =>
+        this.keyStates.map((keyState) =>
+          this.probeKeyModel(keyState, modelCandidate).catch(() => null)
+        )
+      );
+    const results = await Promise.allSettled(probes);
+    for (const result of results) {
+      if (result.status === "fulfilled" && result.value) {
+        // probe succeeded; state already updated by probeKeyModel
       }
     }
 
@@ -135,6 +133,7 @@ export class KiloRouter {
         headers: {
           Accept: "application/json",
         },
+        signal: AbortSignal.timeout(10000),
       });
 
       if (!response.ok) {
@@ -376,6 +375,16 @@ export class KiloRouter {
   }
 
   async kiloInfer(payload: KiloInferPayload): Promise<KiloResponse> {
+    // Use Promise.race to add overall timeout to prevent hanging
+    return Promise.race([
+      this._kiloInferInternal(payload),
+      new Promise<KiloResponse>((_, reject) =>
+        setTimeout(() => reject(new Error("Kilo inference timeout")), 30000)
+      )
+    ]);
+  }
+
+  private async _kiloInferInternal(payload: KiloInferPayload): Promise<KiloResponse> {
     if (!this.initialized) {
       await this.initKiloRouter();
     }

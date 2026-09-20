@@ -66,10 +66,14 @@ export class TinyFishRouter {
       lastSuccessAt: null,
     }));
 
-    for (const keyState of this.keyStates) {
+    // Probe all keys in parallel with timeout
+    const probes = this.keyStates.map(async (keyState) => {
       try {
         const testKey = process.env[keyState.envName];
-        if (!testKey) continue;
+        if (!testKey) {
+          keyState.available = false;
+          return;
+        }
 
         const response = await fetch(buildSearchUrl("test", 1), {
           headers: {
@@ -99,7 +103,9 @@ export class TinyFishRouter {
         keyState.available = false;
         keyState.lastCheckedAt = new Date().toISOString();
       }
-    }
+    });
+
+    await Promise.allSettled(probes);
 
     this.initialized = true;
   }
