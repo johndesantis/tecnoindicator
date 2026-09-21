@@ -59,6 +59,15 @@ const REPUTABLE_HOSTS = [
 
 const RECENT_MONTH = () => new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" });
 
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`timeout after ${ms}ms`)), ms)
+    ),
+  ]);
+}
+
 function isRecentPublishedAt(value: string | undefined): boolean {
   if (!value) return true;
   const date = Date.parse(value);
@@ -136,9 +145,11 @@ async function fetchNews(scope: RegionId): Promise<Array<{ title: string; url: s
 }
 
 async function analyzeSolutions(scope: RegionId): Promise<{ solutions: Solution[]; aiUnavailable: boolean; aiReturnedEmpty: boolean }> {
-  const current = await getCache<Solution[]>(`dynamic-solutions:${scope}`, FACTORS_CACHE_MS);
-  const analytics = scope === "global" ? await getGlobalAnalytics() : await getRegionalAnalytics(scope as Region);
-  const factors = (await getCache<Factor[]>(`dynamic-factors:${scope}`, FACTORS_CACHE_MS)) ?? [];
+   const current = await getCache<Solution[]>(`dynamic-solutions:${scope}`, FACTORS_CACHE_MS);
+   const analytics = scope === "global"
+     ? await withTimeout(getGlobalAnalytics(), 5000).catch(() => ({ timestamp: null, cacheHits: 0, cacheMisses: 0, priceData: {}, lastUpdate: null }))
+     : await withTimeout(getRegionalAnalytics(scope as Region), 5000).catch(() => ({ timestamp: null, cacheHits: 0, cacheMisses: 0, priceData: {}, lastUpdate: null, region: scope }));
+   const factors = (await getCache<Factor[]>(`dynamic-factors:${scope}`, FACTORS_CACHE_MS)) ?? [];
   const news = await fetchNews(scope);
   const systemPrompt = scope === "global"
     ? "You are a Senior Commodity Risk Analyst and Supply Chain Strategist. Based on current global market factors, analytics, and news excerpts, generate exactly 3 actionable solution recommendations for global oil, electricity, and water market participants. Each solution must be tied to a specific factor/trend, include the concrete action to take, and describe expected impact. Solutions must be AI-generated and dynamic — no static or hardcoded solutions are permitted. For regions with insufficient regional news, generate solutions based on global trends that have cross-regional relevance. Return strict JSON only (no markdown)."

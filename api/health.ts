@@ -73,7 +73,13 @@ export default async function handler(_req: Request): Promise<Response> {
       rateLimitedKeys: [],
     }));
 
-    const globalAnalytics = await getGlobalAnalytics();
+    const globalAnalytics = await withTimeout(getGlobalAnalytics(), 5000).catch(() => ({
+      timestamp: null,
+      cacheHits: 0,
+      cacheMisses: 0,
+      priceData: {},
+      lastUpdate: null,
+    }));
     const regionalAnalytics: Record<Region, { lastFetch: string | null; success: boolean }> = {} as Record<
       Region,
       { lastFetch: string | null; success: boolean }
@@ -81,7 +87,7 @@ export default async function handler(_req: Request): Promise<Response> {
 
     for (const region of Object.keys(REGION_NAMES) as Region[]) {
       try {
-        await getRegionalAnalytics(region);
+        await withTimeout(getRegionalAnalytics(region), 5000).catch(() => {});
         regionalAnalytics[region] = {
           lastFetch: new Date().toISOString(),
           success: true,

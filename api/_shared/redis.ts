@@ -19,6 +19,7 @@ async function getRedis() {
         const response = await fetch(`${url}/get/${encodeURIComponent(key)}`, {
           method: "GET",
           headers: { Authorization: auth },
+          signal: AbortSignal.timeout(5000),
         });
         if (!response.ok) return null;
         const data: { result?: string } = await response.json();
@@ -35,6 +36,7 @@ async function getRedis() {
           method: "POST",
           headers: { Authorization: auth, "Content-Type": "text/plain" },
           body: value,
+          signal: AbortSignal.timeout(5000),
         });
         if (!response.ok) {
           // Silently ignore
@@ -49,6 +51,7 @@ async function getRedis() {
         await fetch(`${url}/${encodeURIComponent(key)}`, {
           method: "DELETE",
           headers: { Authorization: auth },
+          signal: AbortSignal.timeout(5000),
         });
       } catch {
         // Silently ignore

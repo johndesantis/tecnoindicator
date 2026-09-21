@@ -110,6 +110,15 @@ const REPUTABLE_HOSTS = [
 const RECENT_MONTH = () =>
   new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" });
 
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`timeout after ${ms}ms`)), ms)
+    ),
+  ]);
+}
+
 function isReputableSource(url: string): boolean {
   try {
     const host = new URL(url).hostname.toLowerCase();
@@ -247,7 +256,9 @@ function buildFallbackFactors(scope: "global" | Region, region: Region | null): 
 async function runFactorAnalysis(scope: "global" | Region, region: Region | null): Promise<Factor[]> {
   const current = await getCache<Factor[]>(`dynamic-factors:${scope}`, FACTORS_CACHE_MS);
   if (current) return current;
-  const analytics = scope === "global" ? await getGlobalAnalytics() : await getRegionalAnalytics(region!);
+  const analytics = scope === "global"
+    ? await withTimeout(getGlobalAnalytics(), 5000).catch(() => ({ timestamp: null, cacheHits: 0, cacheMisses: 0, priceData: {}, lastUpdate: null }))
+    : await withTimeout(getRegionalAnalytics(region!), 5000).catch(() => ({ timestamp: null, cacheHits: 0, cacheMisses: 0, priceData: {}, lastUpdate: null, region }));
   const existing = current ?? buildFallbackFactors(scope, region);
   const searchQuery = (REGION_QUERIES[region ?? "asia"] ?? GLOBAL_QUERIES)[0];
   const search = await tinyfishRouter.tinyfishSearch(`${searchQuery} ${RECENT_MONTH()}`, { limit: 10, region: region ?? undefined });
